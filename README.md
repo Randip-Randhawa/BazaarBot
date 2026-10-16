@@ -28,9 +28,8 @@ source myenv/bin/activate
 If PowerShell blocks the activation script, run
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
 
-Install dependencies and run the tests:
+Install dependencies:
 
 ```bash
 python -m pip install -r requirements.txt
-python -m pytest
 ```
