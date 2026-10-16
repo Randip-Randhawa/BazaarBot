@@ -1,0 +1,83 @@
+import numpy as np
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+from bazaar.env import N_ACTIONS, OBS_SIZE
+
+
+class QNetwork(nn.Module):
+    def __init__(self, hidden_size=128):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(OBS_SIZE, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, N_ACTIONS),
+        )
+
+    def forward(self, obs):
+        return self.layers(obs)
+
+
+class DQNAgent:
+    def __init__(self, hidden_size=128, learning_rate=1e-3, gamma=0.99, epsilon=1.0, device=None, seed=None):
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+        if seed is not None:
+            torch.manual_seed(seed)
+        self.rng = np.random.default_rng(seed)
+
+        self.online_net = QNetwork(hidden_size).to(self.device)
+        # A copy of the online network that only changes when update_target()
+        # is called, so the TD targets don't shift after every gradient step.
+        self.target_net = QNetwork(hidden_size).to(self.device)
+        self.update_target()
+
+        self.optimizer = torch.optim.Adam(self.online_net.parameters(), lr=learning_rate)
+
+    def select_action(self, obs, epsilon=None):
+        if epsilon is None:
+            epsilon = self.epsilon
+        if self.rng.random() < epsilon:
+            return int(self.rng.integers(N_ACTIONS))
+
+        with torch.no_grad():
+            q_values = self.online_net(self._to_tensor(obs, torch.float32))
+        return int(q_values.argmax())
+
+    def update_target(self):
+        self.target_net.load_state_dict(self.online_net.state_dict())
+
+    def update(self, states, actions, rewards, next_states, dones):
+        """Run one gradient step on a batch of transitions and return the loss.
+
+        `dones` should be the `terminated` flags, not `truncated`: a truncated
+        episode didn't really end, so its next state still has value.
+        """
+        states = self._to_tensor(states, torch.float32)
+        actions = self._to_tensor(actions, torch.int64)
+        rewards = self._to_tensor(rewards, torch.float32)
+        next_states = self._to_tensor(next_states, torch.float32)
+        dones = self._to_tensor(dones, torch.float32)
+
+        # Q-value of the action that was actually taken in each transition.
+        q_taken = self.online_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+
+        # TD target: r + gamma * max_a' Q_target(s', a'), with no future value
+        # once the episode has ended.
+        with torch.no_grad():
+            best_next_q = self.target_net(next_states).max(dim=1).values
+            targets = rewards + self.gamma * (1 - dones) * best_next_q
+
+        loss = F.smooth_l1_loss(q_taken, targets)  # Huber loss, less thrown by outliers than MSE
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
+
+    def _to_tensor(self, values, dtype):
+        return torch.as_tensor(np.asarray(values), dtype=dtype, device=self.device)
