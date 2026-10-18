@@ -8,33 +8,54 @@ CONCESSION_RATE_RANGE = (0.1, 0.4)  # share of the gap the seller gives up per c
 PATIENCE_RANGE = (5, 10)  # rounds before the seller loses interest
 MAX_ROUNDS = 10
 
-# Prices in the observation are divided by V, so the highest possible one is
-# the highest possible opening ask.
+# Highest price / V; assumes the ask never rises
 MAX_PRICE = RESERVATION_RANGE[1] * OPENING_ASK_RANGE[1]
 
 STEP_COST = 0.01
 NO_DEAL_PENALTY = 0.3
 
-# What the buyer sees. The seller's minimum price is deliberately not here.
-OBS_ASK = 0
-OBS_OPENING_ASK = 1
-OBS_LAST_OFFER = 2  # 0 until the buyer makes an offer
+# Buyer's view, prices / V; seller's R and personality stay hidden
+OBS_ASK = 0  # current ask
+OBS_OPENING_ASK = 1  # opening ask
+OBS_LAST_OFFER = 2  # buyer's last offer, 0 if none
 OBS_ROUND = 3  # rounds played / MAX_ROUNDS
-OBS_LAST_CONCESSION = 4  # how much the seller dropped their price last time
-OBS_AVG_CONCESSION = 5
-OBS_FINAL_PRICE_FLAG = 6  # always 0 until sellers can bluff
-OBS_CALLED_BACK_FLAG = 7  # always 0 until sellers can call the buyer back
+OBS_LAST_CONCESSION = 4  # seller's last price drop
+OBS_AVG_CONCESSION = 5  # seller's mean price drop
+OBS_FINAL_PRICE_FLAG = 6  # reserved, always 0
+OBS_CALLED_BACK_FLAG = 7  # reserved, always 0
 OBS_SIZE = 8
 
-# The buyer opens at a fraction of the ask, then each concession moves their
-# offer part of the way towards the ask.
-OPEN_FRACTIONS = (0.30, 0.40, 0.50, 0.60)
-CONCEDE_FRACTIONS = (0.00, 0.10, 0.25, 0.50)
-OPEN_ACTIONS = (0, 1, 2, 3)
+OBS_FEATURES = (
+    "current_ask",
+    "opening_ask",
+    "last_offer",
+    "round_progress",
+    "last_concession",
+    "avg_concession",
+    "final_price_flag",
+    "called_back_flag",
+)
+
+OPEN_FRACTIONS = (0.30, 0.40, 0.50, 0.60)  # of the current ask
+CONCEDE_FRACTIONS = (0.00, 0.10, 0.25, 0.50)  # of the ask-offer gap
+OPEN_ACTIONS = (0, 1, 2, 3)  # first offer only
 CONCEDE_ACTIONS = (4, 5, 6, 7)
 ACCEPT = 8
 WALK_AWAY = 9
 N_ACTIONS = 10
+
+ACTION_MEANINGS = (
+    "open at 30% of the ask",
+    "open at 40% of the ask",
+    "open at 50% of the ask",
+    "open at 60% of the ask",
+    "concede 0% of the gap (repeat the last offer)",
+    "concede 10% of the gap",
+    "concede 25% of the gap",
+    "concede 50% of the gap",
+    "accept the current ask",
+    "walk away",
+)
 
 
 class BazaarEnv(gym.Env):
@@ -43,7 +64,7 @@ class BazaarEnv(gym.Env):
     def __init__(self):
         high = np.full(OBS_SIZE, MAX_PRICE, dtype=np.float32)
         high[[OBS_ROUND, OBS_FINAL_PRICE_FLAG, OBS_CALLED_BACK_FLAG]] = 1.0
-        self.observation_space = gym.spaces.Box(np.zeros(OBS_SIZE, dtype=np.float32), high)
+        self.observation_space = gym.spaces.Box(np.zeros(OBS_SIZE, dtype=np.float32), high, dtype=np.float32)
         self.action_space = gym.spaces.Discrete(N_ACTIONS)
         self._done = True
 
