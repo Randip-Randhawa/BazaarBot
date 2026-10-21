@@ -33,8 +33,11 @@ def train(episodes, seed):
     buffer = ReplayBuffer(BUFFER_CAPACITY, seed=seed + 1)
 
     total_steps = 0
+    gradient_updates = 0
+    target_syncs = 0
     recent_rewards = deque(maxlen=LOG_EVERY)
     recent_deals = deque(maxlen=LOG_EVERY)
+    recent_losses = deque(maxlen=LOG_EVERY)
 
     for episode in range(1, episodes + 1):
         # Only the first reset is seeded; later ones continue the same random
@@ -57,20 +60,27 @@ def train(episodes, seed):
             done = terminated or truncated
 
             if len(buffer) >= LEARNING_STARTS:
-                agent.update(*buffer.sample(BATCH_SIZE))
+                recent_losses.append(agent.update(*buffer.sample(BATCH_SIZE)))
+                gradient_updates += 1
             if total_steps % TARGET_UPDATE_EVERY == 0:
                 agent.update_target()
+                target_syncs += 1
 
         recent_rewards.append(episode_reward)
         recent_deals.append(info["outcome"] == "deal")
 
         if episode % LOG_EVERY == 0:
+            # No loss to report until learning has started.
+            loss_text = f"{np.mean(recent_losses):.4f}" if recent_losses else "  n/a "
             print(
                 f"episode {episode:5d} | "
                 f"avg reward {np.mean(recent_rewards):+.3f} | "
                 f"deal rate {np.mean(recent_deals):4.0%} | "
                 f"epsilon {agent.epsilon:.2f} | "
-                f"steps {total_steps}"
+                f"steps {total_steps} | "
+                f"updates {gradient_updates} | "
+                f"loss {loss_text} | "
+                f"target syncs {target_syncs}"
             )
 
     return agent
