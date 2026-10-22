@@ -44,7 +44,11 @@ class DQNAgent:
             epsilon = self.epsilon
         if self.rng.random() < epsilon:
             return int(self.rng.integers(N_ACTIONS))
+        return self.greedy_action(obs)
 
+    def greedy_action(self, obs):
+        """The action with the highest Q-value. Uses no randomness, so evaluation
+        can call it without touching the exploration random stream."""
         with torch.no_grad():
             q_values = self.online_net(self._to_tensor(obs, torch.float32))
         return int(q_values.argmax())

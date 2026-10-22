@@ -25,7 +25,7 @@ def epsilon_at(step):
     return EPSILON_START + progress * (EPSILON_END - EPSILON_START)
 
 
-def train(episodes, seed):
+def train(episodes, seed, show_progress=True):
     # Separate seeds, so the agent's exploration and the buffer's sampling
     # don't draw the same random numbers.
     env = BazaarEnv()
@@ -69,7 +69,7 @@ def train(episodes, seed):
         recent_rewards.append(episode_reward)
         recent_deals.append(info["outcome"] == "deal")
 
-        if episode % LOG_EVERY == 0:
+        if show_progress and episode % LOG_EVERY == 0:
             # No loss to report until learning has started.
             loss_text = f"{np.mean(recent_losses):.4f}" if recent_losses else "  n/a "
             print(
