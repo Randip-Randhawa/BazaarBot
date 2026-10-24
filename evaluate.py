@@ -41,7 +41,7 @@ def main():
     parser.add_argument("--policy", choices=("both", "baseline", "dqn"), default="both")
     parser.add_argument("--train-seeds", type=int, default=5, help="number of independently trained DQNs")
     parser.add_argument("--base-seed", type=int, default=0, help=f"training seeds are base, base+{SEED_SPACING}, ...")
-    parser.add_argument("--train-episodes", type=int, default=3000, help="training episodes per DQN")
+    parser.add_argument("--train-episodes", type=int, default=10000, help="training episodes per DQN")
     parser.add_argument("--eval-episodes", type=int, default=1000, help="evaluation episodes per policy")
     parser.add_argument("--eval-seed", type=int, default=10_000, help="episode i is seeded with eval-seed + i")
     args = parser.parse_args()

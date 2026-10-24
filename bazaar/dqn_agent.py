@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import torch
 from torch import nn
@@ -23,6 +25,7 @@ class QNetwork(nn.Module):
 
 class DQNAgent:
     def __init__(self, hidden_size=128, learning_rate=1e-3, gamma=0.99, epsilon=1.0, device=None, seed=None):
+        self.hidden_size = hidden_size
         self.gamma = gamma
         self.epsilon = epsilon
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -82,6 +85,20 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
         return loss.item()
+
+    def save(self, path):
+        """Save the trained network, enough to rebuild the agent for evaluation."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"hidden_size": self.hidden_size, "weights": self.online_net.state_dict()}, path)
+
+    @classmethod
+    def load(cls, path, device=None):
+        checkpoint = torch.load(path, map_location="cpu")
+        agent = cls(hidden_size=checkpoint["hidden_size"], epsilon=0.0, device=device)
+        agent.online_net.load_state_dict(checkpoint["weights"])
+        agent.update_target()
+        return agent
 
     def _to_tensor(self, values, dtype):
         return torch.as_tensor(np.asarray(values), dtype=dtype, device=self.device)

@@ -1,10 +1,12 @@
 import argparse
+import copy
 from collections import deque
 
 import numpy as np
 
 from bazaar.dqn_agent import DQNAgent
 from bazaar.env import BazaarEnv
+from bazaar.evaluation import evaluate_dqn, summarize
 from bazaar.replay_buffer import ReplayBuffer
 
 BUFFER_CAPACITY = 20_000
@@ -17,6 +19,13 @@ EPSILON_END = 0.05
 EPSILON_DECAY_STEPS = 5_000
 
 LOG_EVERY = 100  # episodes
+
+# Training performance swings up and down, so the network is checked on a
+# fixed set of validation sellers and the best version is kept. These seeds
+# are kept well away from evaluate.py's test sellers (10_000 onwards).
+VALIDATE_EVERY = 500  # episodes
+VALIDATION_EPISODES = 500
+VALIDATION_SEED = 20_000
 
 
 def epsilon_at(step):
@@ -38,6 +47,9 @@ def train(episodes, seed, show_progress=True):
     recent_rewards = deque(maxlen=LOG_EVERY)
     recent_deals = deque(maxlen=LOG_EVERY)
     recent_losses = deque(maxlen=LOG_EVERY)
+    best_reward = -float("inf")
+    best_episode = None
+    best_weights = None
 
     for episode in range(1, episodes + 1):
         # Only the first reset is seeded; later ones continue the same random
@@ -83,6 +95,19 @@ def train(episodes, seed, show_progress=True):
                 f"target syncs {target_syncs}"
             )
 
+        # Also check after the last episode, so even a short run is validated.
+        if episode % VALIDATE_EVERY == 0 or episode == episodes:
+            reward = summarize(evaluate_dqn(agent, VALIDATION_EPISODES, VALIDATION_SEED))["avg_reward"]
+            if reward > best_reward:
+                best_reward, best_episode = reward, episode
+                best_weights = copy.deepcopy(agent.online_net.state_dict())
+            if show_progress:
+                print(f"validation reward {reward:+.3f} (best {best_reward:+.3f} at episode {best_episode})")
+
+    agent.online_net.load_state_dict(best_weights)
+    agent.update_target()
+    if show_progress:
+        print(f"kept the network from episode {best_episode}, validation reward {best_reward:+.3f}")
     return agent
 
 
@@ -90,5 +115,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the BazaarBot DQN buyer.")
     parser.add_argument("--episodes", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--save", help="where to save the model (default: models/dqn_seed<SEED>.pt)")
     args = parser.parse_args()
-    train(args.episodes, args.seed)
+
+    agent = train(args.episodes, args.seed)
+    path = args.save or f"models/dqn_seed{args.seed}.pt"
+    agent.save(path)
+    print(f"saved to {path}")

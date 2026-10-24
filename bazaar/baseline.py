@@ -10,7 +10,7 @@ from bazaar.env import (
     OPEN_FRACTIONS,
 )
 
-OPENING_TARGET = 0.3  # first offer, as a fraction of V
+OPENING_TARGET = 0.6  # first offer, as a fraction of V
 CONCESSION_STEP = 0.25  # share of the remaining distance to V given up per offer
 
 
@@ -24,7 +24,7 @@ def next_target_offer(last_offer):
 class RuleBasedBuyer:
     """Fixed-strategy buyer used only as a baseline for the DQN.
 
-    It opens at 0.3 V, then moves 25% of the remaining distance towards V with
+    It opens at 0.6 V, then moves 25% of the remaining distance towards V with
     each new offer. The environment only offers fixed fractions of the ask, so
     each turn it picks the legal offer closest to its target (ties go to the
     cheaper one). If the seller's ask is already at or below the target it
