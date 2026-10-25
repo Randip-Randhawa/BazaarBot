@@ -4,9 +4,16 @@ import numpy as np
 ITEM_VALUE_RANGE = (100.0, 2000.0)  # V, in rupees
 RESERVATION_RANGE = (0.6, 0.9)  # seller's minimum price R, as a fraction of V
 OPENING_ASK_RANGE = (1.5, 2.5)  # seller's first asking price, as a multiple of R
-CONCESSION_RATE_RANGE = (0.1, 0.4)  # share of the gap the seller gives up per counter
 PATIENCE_RANGE = (5, 10)  # rounds before the seller loses interest
 MAX_ROUNDS = 10
+
+# Each seller has a hidden personality that decides how they concede. The
+# concession rate is the share of the ask-offer gap they give up per counter.
+PERSONALITIES = ("stubborn", "desperate")
+STUBBORN_RATE_RANGE = (0.05, 0.15)  # small, and never changes
+DESPERATE_START_RATE_RANGE = (0.20, 0.35)
+DESPERATE_RATE_GROWTH = 0.10  # added after every counter
+MAX_CONCESSION_RATE = 0.9
 
 # Highest price / V; assumes the ask never rises
 MAX_PRICE = RESERVATION_RANGE[1] * OPENING_ASK_RANGE[1]
@@ -75,7 +82,11 @@ class BazaarEnv(gym.Env):
         self._item_value = rng.uniform(*ITEM_VALUE_RANGE)
         self._reservation_price = self._item_value * rng.uniform(*RESERVATION_RANGE)
         self._opening_ask = self._reservation_price * rng.uniform(*OPENING_ASK_RANGE)
-        self._concession_rate = rng.uniform(*CONCESSION_RATE_RANGE)
+        self._personality = str(rng.choice(PERSONALITIES))
+        if self._personality == "stubborn":
+            self._concession_rate = rng.uniform(*STUBBORN_RATE_RANGE)
+        else:
+            self._concession_rate = rng.uniform(*DESPERATE_START_RATE_RANGE)
         self._patience = int(rng.integers(PATIENCE_RANGE[0], PATIENCE_RANGE[1] + 1))
 
         self._ask = self._opening_ask
@@ -121,6 +132,10 @@ class BazaarEnv(gym.Env):
         self._last_concession = self._ask - new_ask
         self._ask = new_ask
         self._n_counters += 1
+
+        # A desperate seller gives up more with every round that passes.
+        if self._personality == "desperate":
+            self._concession_rate = min(self._concession_rate + DESPERATE_RATE_GROWTH, MAX_CONCESSION_RATE)
         return self._next_round(reward)
 
     def _next_round(self, reward, invalid_action=False):
@@ -133,6 +148,9 @@ class BazaarEnv(gym.Env):
     def _finish(self, reward, outcome, price=None, invalid_action=False):
         self._done = True
         info = self._info(outcome, invalid_action)
+        # Revealed only once the negotiation is over, so evaluation can break
+        # results down by personality. The agent learns from observations only.
+        info["personality"] = self._personality
         if price is None:
             reward -= NO_DEAL_PENALTY
         else:

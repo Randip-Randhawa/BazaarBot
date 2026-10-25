@@ -29,6 +29,7 @@ class EpisodeResult:
     reward: float  # summed over every step, including the last one
     length: int  # env.step() calls
     deal_price: float | None  # None when the episode ended without a deal
+    personality: str | None = None  # revealed by the env when the episode ends
 
     @property
     def surplus(self):
@@ -47,7 +48,7 @@ def run_episode(env, policy, seed):
         total_reward += reward
         length += 1
         if terminated or truncated:
-            return EpisodeResult(total_reward, length, info.get("deal_price"))
+            return EpisodeResult(total_reward, length, info.get("deal_price"), info.get("personality"))
 
 
 def evaluate(policy, n_episodes, first_seed):
@@ -86,6 +87,14 @@ def summarize(results):
         "avg_surplus": float(np.mean([r.surplus for r in results])),
         "avg_length": float(np.mean([r.length for r in results])),
     }
+
+
+def summarize_by_personality(results):
+    """One summary per seller personality, in the order they first appear."""
+    groups = {}
+    for r in results:
+        groups.setdefault(r.personality, []).append(r)
+    return {personality: summarize(group) for personality, group in groups.items()}
 
 
 def mean_and_std(values):

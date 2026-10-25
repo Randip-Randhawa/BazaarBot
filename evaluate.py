@@ -9,7 +9,8 @@ import argparse
 import time
 
 from bazaar.baseline import RuleBasedBuyer
-from bazaar.evaluation import evaluate, evaluate_dqn, mean_and_std, summarize
+from bazaar.env import PERSONALITIES
+from bazaar.evaluation import evaluate, evaluate_dqn, mean_and_std, summarize, summarize_by_personality
 from train import train
 
 # train() uses seed, seed + 1 and seed + 2 internally, so training seeds are
@@ -36,6 +37,19 @@ def format_aggregate(label, summaries):
     return f"{label:<22} " + "  ".join(f"{name}={cell}" for name, cell in zip(METRICS, cells))
 
 
+def format_personality_row(label, results):
+    """Deal rate, reward and deal price against each personality."""
+    by_personality = summarize_by_personality(results)
+    cells = []
+    for personality in PERSONALITIES:
+        s = by_personality.get(personality)
+        if s is None:
+            cells.append(f"{'n/a':<21}")
+        else:
+            cells.append(f"{s['deal_rate']:>6.1%} {s['avg_reward']:>+7.3f} {s['avg_deal_price']:>6.3f}")
+    return f"{label:<22} " + "    ".join(cells)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", choices=("both", "baseline", "dqn"), default="both")
@@ -54,30 +68,52 @@ def main():
     print()
     print(HEADER)
 
-    baseline = None
+    baseline, baseline_results = None, None
     if args.policy != "dqn":
-        baseline = summarize(evaluate(RuleBasedBuyer().select_action, args.eval_episodes, args.eval_seed))
+        baseline_results = evaluate(RuleBasedBuyer().select_action, args.eval_episodes, args.eval_seed)
+        baseline = summarize(baseline_results)
         print(format_row("rule-based baseline", baseline))
 
-    if args.policy == "baseline":
-        return
+    dqn_results = {}
+    if args.policy != "baseline":
+        for seed in train_seeds:
+            start = time.perf_counter()
+            agent = train(args.train_episodes, seed, show_progress=False)
+            dqn_results[seed] = evaluate_dqn(agent, args.eval_episodes, args.eval_seed)
+            summary = summarize(dqn_results[seed])
+            print(format_row(f"DQN train seed {seed}", summary) + f"   ({time.perf_counter() - start:.0f}s)")
 
-    dqn_summaries = []
-    for seed in train_seeds:
-        start = time.perf_counter()
-        agent = train(args.train_episodes, seed, show_progress=False)
-        summary = summarize(evaluate_dqn(agent, args.eval_episodes, args.eval_seed))
-        dqn_summaries.append(summary)
-        print(format_row(f"DQN train seed {seed}", summary) + f"   ({time.perf_counter() - start:.0f}s)")
+    if dqn_results:
+        dqn_summaries = [summarize(results) for results in dqn_results.values()]
+        print()
+        print("Mean +/- sample std across the independently trained DQNs (not across episodes):")
+        print(format_aggregate("DQN", dqn_summaries))
+        if baseline is not None:
+            gaps = [s["avg_reward"] - baseline["avg_reward"] for s in dqn_summaries]
+            mean, std = mean_and_std(gaps)
+            wins = sum(gap > 0 for gap in gaps)
+            print(f"DQN reward - baseline reward: {mean:+.3f} +/- {std:.3f}  (DQN ahead for {wins} of {len(gaps)} seeds)")
 
     print()
-    print("Mean +/- sample std across the independently trained DQNs (not across episodes):")
-    print(format_aggregate("DQN", dqn_summaries))
-    if baseline is not None:
-        gaps = [s["avg_reward"] - baseline["avg_reward"] for s in dqn_summaries]
-        mean, std = mean_and_std(gaps)
-        wins = sum(gap > 0 for gap in gaps)
-        print(f"DQN reward - baseline reward: {mean:+.3f} +/- {std:.3f}  (DQN ahead for {wins} of {len(gaps)} seeds)")
+    print("By seller personality (deal rate, reward, deal price):")
+    print(f"{'policy':<22} " + "    ".join(f"{personality:<21}" for personality in PERSONALITIES))
+    if baseline_results is not None:
+        print(format_personality_row("rule-based baseline", baseline_results))
+    for seed, results in dqn_results.items():
+        print(format_personality_row(f"DQN train seed {seed}", results))
+
+    if dqn_results and baseline_results is not None:
+        baseline_by = summarize_by_personality(baseline_results)
+        for personality in PERSONALITIES:
+            if personality not in baseline_by:  # possible with very few evaluation episodes
+                continue
+            gaps = [
+                summarize_by_personality(results)[personality]["avg_reward"] - baseline_by[personality]["avg_reward"]
+                for results in dqn_results.values()
+            ]
+            mean, std = mean_and_std(gaps)
+            wins = sum(gap > 0 for gap in gaps)
+            print(f"DQN - baseline reward vs {personality}: {mean:+.3f} +/- {std:.3f}  (DQN ahead for {wins} of {len(gaps)} seeds)")
 
 
 if __name__ == "__main__":
