@@ -1,7 +1,7 @@
 """Tests for BazaarEnv's observation and action space definitions.
 
-These deliberately do not call reset() or step(): seller behaviour, rewards
-and termination are not part of the agreed spec yet.
+These deliberately do not call reset() or step(); seller behaviour is tested in
+test_personalities.py.
 """
 
 import gymnasium as gym
@@ -21,6 +21,7 @@ OBS_INDEX_NAMES = (
     "OBS_CALLED_BACK_FLAG",
 )
 PRICE_FEATURES = ("OBS_ASK", "OBS_OPENING_ASK", "OBS_LAST_OFFER", "OBS_LAST_CONCESSION", "OBS_AVG_CONCESSION")
+CONCESSION_FEATURES = ("OBS_LAST_CONCESSION", "OBS_AVG_CONCESSION")
 UNIT_FEATURES = ("OBS_ROUND", "OBS_FINAL_PRICE_FLAG", "OBS_CALLED_BACK_FLAG")
 HIDDEN_TERMS = ("reservation", "minimum", "personality", "concession_rate", "patience")
 
@@ -44,12 +45,17 @@ def test_observation_indices_cover_the_vector_once():
 
 def test_observation_bounds():
     space = BazaarEnv().observation_space
-    assert np.isclose(bazaar_env.MAX_PRICE, 2.25)
-    assert np.all(space.low == 0.0)
+    # The highest opening ask is 2.5 x 0.9 V = 2.25 V, and a tourist-spotter
+    # can raise it by 20%. That raise is also the most negative concession.
+    assert np.isclose(bazaar_env.MAX_PRICE, 2.7)
+    assert np.isclose(bazaar_env.MIN_CONCESSION, -0.45)
     for name in PRICE_FEATURES:
         assert np.isclose(space.high[getattr(bazaar_env, name)], bazaar_env.MAX_PRICE)
     for name in UNIT_FEATURES:
         assert space.high[getattr(bazaar_env, name)] == 1.0
+    for name in OBS_INDEX_NAMES:
+        expected_low = bazaar_env.MIN_CONCESSION if name in CONCESSION_FEATURES else 0.0
+        assert np.isclose(space.low[getattr(bazaar_env, name)], expected_low)
 
 
 def test_hidden_seller_information_is_not_observed():
