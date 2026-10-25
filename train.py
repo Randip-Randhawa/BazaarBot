@@ -3,10 +3,11 @@ import copy
 from collections import deque
 
 import numpy as np
+import torch
 
 from bazaar.dqn_agent import DQNAgent
 from bazaar.env import BazaarEnv
-from bazaar.evaluation import evaluate_dqn, summarize
+from bazaar.evaluation import evaluate_dqn, save_csv, summarize
 from bazaar.replay_buffer import ReplayBuffer
 
 BUFFER_CAPACITY = 20_000
@@ -22,7 +23,7 @@ LOG_EVERY = 100  # episodes
 
 # Training performance swings up and down, so the network is checked on a
 # fixed set of validation sellers and the best version is kept. These seeds
-# are kept well away from evaluate.py's test sellers (10_000 onwards).
+# are kept well away from evaluate.py's test sellers (100_000 onwards).
 VALIDATE_EVERY = 500  # episodes
 VALIDATION_EPISODES = 500
 VALIDATION_SEED = 20_000
@@ -34,7 +35,16 @@ def epsilon_at(step):
     return EPSILON_START + progress * (EPSILON_END - EPSILON_START)
 
 
-def train(episodes, seed, show_progress=True):
+def train(episodes, seed, show_progress=True, curve_path=None):
+    """Train a DQN buyer and return it, holding the weights that scored best on
+    the validation sellers. If `curve_path` is given, every validation check is
+    also written there as a CSV row, for plotting learning curves."""
+    # With several threads PyTorch adds numbers up in a machine-dependent order,
+    # and those tiny differences snowball, so the same seed could train a
+    # different network on another computer. One thread is also faster for a
+    # network this small.
+    torch.set_num_threads(1)
+
     # Separate seeds, so the agent's exploration and the buffer's sampling
     # don't draw the same random numbers.
     env = BazaarEnv()
@@ -50,6 +60,7 @@ def train(episodes, seed, show_progress=True):
     best_reward = -float("inf")
     best_episode = None
     best_weights = None
+    curve = []
 
     for episode in range(1, episodes + 1):
         # Only the first reset is seeded; later ones continue the same random
@@ -97,15 +108,25 @@ def train(episodes, seed, show_progress=True):
 
         # Also check after the last episode, so even a short run is validated.
         if episode % VALIDATE_EVERY == 0 or episode == episodes:
-            reward = summarize(evaluate_dqn(agent, VALIDATION_EPISODES, VALIDATION_SEED))["avg_reward"]
+            validation = summarize(evaluate_dqn(agent, VALIDATION_EPISODES, VALIDATION_SEED))
+            reward = validation["avg_reward"]
             if reward > best_reward:
                 best_reward, best_episode = reward, episode
                 best_weights = copy.deepcopy(agent.online_net.state_dict())
+            curve.append({
+                "episode": episode,
+                "env_steps": total_steps,
+                "epsilon": round(agent.epsilon, 4),
+                "validation_reward": round(reward, 5),
+                "validation_deal_rate": round(validation["deal_rate"], 5),
+            })
             if show_progress:
                 print(f"validation reward {reward:+.3f} (best {best_reward:+.3f} at episode {best_episode})")
 
     agent.online_net.load_state_dict(best_weights)
     agent.update_target()
+    if curve_path is not None:
+        save_csv(curve_path, curve)
     if show_progress:
         print(f"kept the network from episode {best_episode}, validation reward {best_reward:+.3f}")
     return agent
@@ -113,12 +134,13 @@ def train(episodes, seed, show_progress=True):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the BazaarBot DQN buyer.")
-    parser.add_argument("--episodes", type=int, default=2000)
+    parser.add_argument("--episodes", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--save", help="where to save the model (default: models/dqn_seed<SEED>.pt)")
+    parser.add_argument("--curve", help="optional CSV file for the validation learning curve")
     args = parser.parse_args()
 
-    agent = train(args.episodes, args.seed)
+    agent = train(args.episodes, args.seed, curve_path=args.curve)
     path = args.save or f"models/dqn_seed{args.seed}.pt"
     agent.save(path)
     print(f"saved to {path}")

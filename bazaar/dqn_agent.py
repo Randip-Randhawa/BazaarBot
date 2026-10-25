@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from bazaar.env import N_ACTIONS, OBS_SIZE
+from bazaar.env import N_ACTIONS, OBS_SIZE, action_mask
 
 
 class QNetwork(nn.Module):
@@ -46,14 +46,16 @@ class DQNAgent:
         if epsilon is None:
             epsilon = self.epsilon
         if self.rng.random() < epsilon:
-            return int(self.rng.integers(N_ACTIONS))
+            # Explore, but only among actions that make sense right now.
+            return int(self.rng.choice(np.flatnonzero(action_mask(obs))))
         return self.greedy_action(obs)
 
     def greedy_action(self, obs):
-        """The action with the highest Q-value. Uses no randomness, so evaluation
-        can call it without touching the exploration random stream."""
+        """The valid action with the highest Q-value. Uses no randomness, so
+        evaluation can call it without touching the exploration random stream."""
         with torch.no_grad():
             q_values = self.online_net(self._to_tensor(obs, torch.float32))
+            q_values[~self._to_tensor(action_mask(obs), torch.bool)] = -torch.inf
         return int(q_values.argmax())
 
     def update_target(self):
@@ -67,24 +69,30 @@ class DQNAgent:
         """
         states = self._to_tensor(states, torch.float32)
         actions = self._to_tensor(actions, torch.int64)
-        rewards = self._to_tensor(rewards, torch.float32)
-        next_states = self._to_tensor(next_states, torch.float32)
-        dones = self._to_tensor(dones, torch.float32)
 
         # Q-value of the action that was actually taken in each transition.
         q_taken = self.online_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-
-        # TD target: r + gamma * max_a' Q_target(s', a'), with no future value
-        # once the episode has ended.
-        with torch.no_grad():
-            best_next_q = self.target_net(next_states).max(dim=1).values
-            targets = rewards + self.gamma * (1 - dones) * best_next_q
+        targets = self.td_targets(rewards, next_states, dones)
 
         loss = F.smooth_l1_loss(q_taken, targets)  # Huber loss, less thrown by outliers than MSE
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         return loss.item()
+
+    def td_targets(self, rewards, next_states, dones):
+        """r + gamma * max_a' Q_target(s', a'), where the max only considers
+        actions that are valid in s', and there is no future value once the
+        episode has ended."""
+        next_valid = self._to_tensor(action_mask(next_states), torch.bool)
+        rewards = self._to_tensor(rewards, torch.float32)
+        next_states = self._to_tensor(next_states, torch.float32)
+        dones = self._to_tensor(dones, torch.float32)
+
+        with torch.no_grad():
+            next_q = self.target_net(next_states).masked_fill(~next_valid, -torch.inf)
+            best_next_q = next_q.max(dim=1).values
+            return rewards + self.gamma * (1 - dones) * best_next_q
 
     def save(self, path):
         """Save the trained network, enough to rebuild the agent for evaluation."""

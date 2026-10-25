@@ -11,13 +11,18 @@ Metric definitions (all prices are fractions of the item value V):
     avg surplus      mean of (1 - deal price) over all episodes, counting an
                      episode without a deal as 0
     avg length       mean number of env.step() calls per episode
+    surplus captured total surplus / total best possible surplus, where the
+                     best possible is paying exactly the seller's minimum R
+                     (1 - R/V), as an oracle who knew R would
 
 Reward and surplus are not independent. The environment's reward is the
 surplus minus the costs of haggling:
     reward = surplus - STEP_COST * length - NO_DEAL_PENALTY * (no deal)
 """
 
+import csv
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -30,10 +35,15 @@ class EpisodeResult:
     length: int  # env.step() calls
     deal_price: float | None  # None when the episode ended without a deal
     personality: str | None = None  # revealed by the env when the episode ends
+    reservation_price: float | None = None  # R / V, also revealed at the end
 
     @property
     def surplus(self):
         return 0.0 if self.deal_price is None else 1.0 - self.deal_price
+
+    @property
+    def best_surplus(self):
+        return None if self.reservation_price is None else 1.0 - self.reservation_price
 
 
 def run_episode(env, policy, seed):
@@ -48,7 +58,13 @@ def run_episode(env, policy, seed):
         total_reward += reward
         length += 1
         if terminated or truncated:
-            return EpisodeResult(total_reward, length, info.get("deal_price"), info.get("personality"))
+            return EpisodeResult(
+                total_reward,
+                length,
+                info.get("deal_price"),
+                info.get("personality"),
+                info.get("reservation_price"),
+            )
 
 
 def evaluate(policy, n_episodes, first_seed):
@@ -76,6 +92,13 @@ def evaluate_dqn(agent, n_episodes, first_seed):
         agent.online_net.train(was_training)
 
 
+def surplus_captured(results):
+    best = [r.best_surplus for r in results]
+    if None in best:
+        return float("nan")  # the seller's minimum wasn't revealed
+    return sum(r.surplus for r in results) / sum(best)
+
+
 def summarize(results):
     deal_prices = [r.deal_price for r in results if r.deal_price is not None]
     return {
@@ -85,6 +108,7 @@ def summarize(results):
         "avg_reward": float(np.mean([r.reward for r in results])),
         "avg_deal_price": float(np.mean(deal_prices)) if deal_prices else float("nan"),
         "avg_surplus": float(np.mean([r.surplus for r in results])),
+        "surplus_captured": surplus_captured(results),
         "avg_length": float(np.mean([r.length for r in results])),
     }
 
@@ -95,6 +119,16 @@ def summarize_by_personality(results):
     for r in results:
         groups.setdefault(r.personality, []).append(r)
     return {personality: summarize(group) for personality, group in groups.items()}
+
+
+def save_csv(path, rows):
+    """Write a list of same-keyed dicts as a CSV file (read by pgfplots in the report)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def mean_and_std(values):

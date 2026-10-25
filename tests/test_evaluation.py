@@ -1,10 +1,13 @@
+import csv
+import math
+
 import pytest
 import torch
 
 from bazaar.baseline import RuleBasedBuyer
 from bazaar.dqn_agent import DQNAgent
 from bazaar.env import NO_DEAL_PENALTY, STEP_COST
-from bazaar.evaluation import EpisodeResult, evaluate, evaluate_dqn, mean_and_std, run_episode, summarize
+from bazaar.evaluation import EpisodeResult, evaluate, evaluate_dqn, mean_and_std, run_episode, save_csv, summarize
 
 
 class ScriptedEnv:
@@ -103,3 +106,30 @@ def test_dqn_evaluation_is_greedy_and_leaves_the_agent_unchanged():
     assert len(agent.optimizer.state) == 0  # no optimizer step ever ran
     for name, value in agent.online_net.state_dict().items():
         assert torch.equal(value, params_before[name])
+
+
+def test_surplus_captured_compares_with_paying_exactly_the_minimum():
+    results = [
+        EpisodeResult(reward=0.19, length=2, deal_price=0.8, reservation_price=0.7),  # got 0.2 of a possible 0.3
+        EpisodeResult(reward=-0.31, length=1, deal_price=None, reservation_price=0.75),  # got 0 of 0.25
+    ]
+    assert summarize(results)["surplus_captured"] == pytest.approx(0.2 / 0.55)
+
+
+def test_surplus_captured_is_unknown_without_the_minimum():
+    results = [EpisodeResult(reward=0.19, length=2, deal_price=0.8)]
+    assert math.isnan(summarize(results)["surplus_captured"])
+
+
+def test_real_episodes_record_the_revealed_minimum():
+    for r in evaluate(RuleBasedBuyer().select_action, 50, first_seed=0):
+        assert 0.6 <= r.reservation_price <= 0.9
+        assert r.surplus <= r.best_surplus + 1e-9  # nobody pays less than the minimum
+
+
+def test_save_csv_writes_a_header_and_rows(tmp_path):
+    path = tmp_path / "out" / "table.csv"
+    save_csv(path, [{"policy": "a", "reward": 0.1}, {"policy": "b", "reward": -0.2}])
+    with open(path, newline="") as file:
+        rows = list(csv.DictReader(file))
+    assert rows == [{"policy": "a", "reward": "0.1"}, {"policy": "b", "reward": "-0.2"}]
