@@ -167,27 +167,6 @@ def main():
     print()
     print(f"results written to {results_dir}/" + (f", models to {models_dir}/" if dqn_results else ""))
 
-    print()
-    print("By seller personality (deal rate, reward, deal price):")
-    print(f"{'policy':<22} " + "    ".join(f"{personality:<21}" for personality in PERSONALITIES))
-    if baseline_results is not None:
-        print(format_personality_row("rule-based baseline", baseline_results))
-    for seed, results in dqn_results.items():
-        print(format_personality_row(f"DQN train seed {seed}", results))
-
-    if dqn_results and baseline_results is not None:
-        baseline_by = summarize_by_personality(baseline_results)
-        for personality in PERSONALITIES:
-            if personality not in baseline_by:  # possible with very few evaluation episodes
-                continue
-            gaps = [
-                summarize_by_personality(results)[personality]["avg_reward"] - baseline_by[personality]["avg_reward"]
-                for results in dqn_results.values()
-            ]
-            mean, std = mean_and_std(gaps)
-            wins = sum(gap > 0 for gap in gaps)
-            print(f"DQN - baseline reward vs {personality}: {mean:+.3f} +/- {std:.3f}  (DQN ahead for {wins} of {len(gaps)} seeds)")
-
 
 if __name__ == "__main__":
     main()
